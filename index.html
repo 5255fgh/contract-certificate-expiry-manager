@@ -1,0 +1,1014 @@
+<!--
+  项目名称：合同 / 证件到期管理系统
+  项目地址：https://github.com/5255fgh/contract-certificate-expiry-manager
+  主要功能：到期提醒、续期管理、搜索筛选、Excel 导入导出、本地备份恢复
+  数据存储：浏览器 localStorage
+  许可证：GNU General Public License v3.0
+  说明：本项目使用 SheetJS CDN 提供 Excel 读写能力。
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>合同 / 证件到期管理</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --danger: #dc2626;
+      --warning: #d97706;
+      --success: #16a34a;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 12px;
+      max-width: 1280px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { font-size: 0.86rem; color: var(--muted); margin-bottom: 16px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .toolbar,
+    .filters,
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .toolbar { margin-bottom: 12px; }
+    .filters { margin-top: 10px; }
+    .stats { margin-top: 12px; }
+
+    .btn,
+    .file-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 38px;
+      padding: 8px 13px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: 0.15s ease;
+    }
+
+    .btn { border: none; }
+    .btn:hover, .file-label:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { background: white; color: var(--text); border: 1px solid var(--border); }
+    .btn-success { background: var(--success); color: white; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-warning { background: var(--warning); color: white; }
+
+    .file-label {
+      background: white;
+      border: 1px dashed #94a3b8;
+    }
+
+    input[type="file"] { display: none; }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 36px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 0.88rem;
+      color: var(--text);
+      background: white;
+    }
+
+    input:focus,
+    select:focus {
+      outline: 2px solid rgba(37, 99, 235, 0.18);
+      border-color: var(--primary);
+    }
+
+    .filter-control { width: 160px; }
+    .filter-search { width: min(320px, 100%); flex: 1 1 220px; }
+
+    .stat {
+      padding: 7px 11px;
+      border-radius: 7px;
+      background: #f1f5f9;
+      font-size: 0.84rem;
+    }
+    .stat.overdue { background: #fef2f2; color: var(--danger); }
+    .stat.soon { background: #fff7ed; color: var(--warning); }
+    .stat.ok { background: #f0fdf4; color: var(--success); }
+
+    .table-card { padding: 0; overflow: hidden; }
+    .table-wrap { overflow: auto; max-height: 68vh; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; min-width: 1050px; }
+    th, td { padding: 8px 9px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f1f5f9;
+      font-weight: 700;
+    }
+
+    tr.row-overdue { background: #fef2f2; }
+    tr.row-soon { background: #fff7ed; }
+    tr.row-complete { opacity: 0.72; }
+
+    .days { font-weight: 700; white-space: nowrap; }
+    .days.overdue { color: var(--danger); }
+    .days.soon { color: var(--warning); }
+    .days.ok { color: var(--success); }
+    .days.muted { color: var(--muted); }
+
+    .row-actions { display: flex; gap: 6px; }
+    .mini-btn { padding: 5px 8px; min-height: 30px; font-size: 0.78rem; }
+
+    .empty { text-align: center; padding: 42px 16px; color: var(--muted); }
+
+    .notice {
+      display: none;
+      margin-top: 10px;
+      padding: 9px 11px;
+      border-radius: 8px;
+      font-size: 0.84rem;
+    }
+    .notice.show { display: block; }
+    .notice.warning { background: #fff7ed; color: #9a3412; }
+    .notice.error { background: #fef2f2; color: #991b1b; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%) translateY(20px);
+      background: #0f172a;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 9px;
+      opacity: 0;
+      pointer-events: none;
+      transition: 0.2s ease;
+      z-index: 999;
+      max-width: calc(100vw - 32px);
+      font-size: 0.86rem;
+      box-shadow: 0 8px 24px rgba(15,23,42,.2);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 8px; }
+      .toolbar .btn,
+      .toolbar .file-label { flex: 1 1 calc(50% - 8px); }
+      .filters > * { width: 100%; flex-basis: 100%; }
+
+      .table-wrap { max-height: none; overflow: visible; }
+      table, thead, tbody, th, td, tr { display: block; min-width: 0; }
+      thead { display: none; }
+      tbody { padding: 8px; }
+
+      tbody tr {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 10px;
+        padding: 10px;
+        background: white;
+      }
+
+      tbody tr.row-overdue { background: #fef2f2; }
+      tbody tr.row-soon { background: #fff7ed; }
+
+      tbody td {
+        display: grid;
+        grid-template-columns: 86px 1fr;
+        gap: 8px;
+        align-items: center;
+        border: none;
+        padding: 6px 0;
+      }
+
+      tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      tbody td.actions-cell { grid-template-columns: 86px 1fr; }
+      .row-actions { justify-content: flex-start; }
+      .empty { display: block; }
+      .empty::before { content: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>合同 / 证件到期管理</h1>
+  <p class="subtitle">自动计算剩余天数 · 支持 Excel 导入导出 · 数据保存在当前浏览器</p>
+
+  <section class="card">
+    <div class="toolbar">
+      <button class="btn btn-primary" id="btnAdd">＋ 新增记录</button>
+
+      <label class="file-label">
+        导入 Excel
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+      </label>
+
+      <button class="btn btn-success" id="btnExportPending">导出待处理</button>
+      <button class="btn btn-outline" id="btnExportAll">导出全部</button>
+      <button class="btn btn-outline" id="btnBackup">备份数据</button>
+
+      <label class="file-label">
+        恢复备份
+        <input type="file" id="backupInput" accept=".json" />
+      </label>
+
+      <button class="btn btn-danger" id="btnClear">清空全部</button>
+    </div>
+
+    <div class="filters">
+      <input class="filter-search" id="searchInput" placeholder="搜索姓名、证件类型、负责人或备注" aria-label="搜索" />
+
+      <select class="filter-control" id="statusFilter" aria-label="状态筛选">
+        <option value="all">全部到期状态</option>
+        <option value="overdue">已过期</option>
+        <option value="soon">提醒期内</option>
+        <option value="normal">正常</option>
+        <option value="invalid">缺少有效日期</option>
+      </select>
+
+      <select class="filter-control" id="processFilter" aria-label="办理状态筛选">
+        <option value="all">全部办理状态</option>
+        <option value="待处理">待处理</option>
+        <option value="办理中">办理中</option>
+        <option value="已续期">已续期</option>
+        <option value="无需处理">无需处理</option>
+      </select>
+
+      <select class="filter-control" id="sortSelect" aria-label="排序方式">
+        <option value="daysAsc">按到期日从近到远</option>
+        <option value="daysDesc">按到期日从远到近</option>
+        <option value="nameAsc">按姓名排序</option>
+        <option value="updatedDesc">按最近修改排序</option>
+      </select>
+    </div>
+
+    <div class="stats">
+      <div class="stat">全部：<strong id="statTotal">0</strong></div>
+      <div class="stat soon">待处理：<strong id="statPending">0</strong></div>
+      <div class="stat overdue">已过期：<strong id="statOverdue">0</strong></div>
+      <div class="stat soon">提醒期内：<strong id="statSoon">0</strong></div>
+      <div class="stat ok">正常：<strong id="statNormal">0</strong></div>
+      <div class="stat">当前显示：<strong id="statVisible">0</strong></div>
+    </div>
+
+    <div id="xlsxNotice" class="notice warning">
+      Excel 插件未加载成功。新增、编辑和本地保存仍可使用，但 Excel 导入导出暂不可用。
+    </div>
+
+    <p class="footer-note" id="saveInfo">尚未保存</p>
+    <p class="footer-note" id="backupTip" style="display:none;">建议定期点击“备份数据”，避免清理浏览器数据后丢失记录。</p>
+  </section>
+
+  <section class="card table-card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:120px;">姓名 / 单位</th>
+            <th style="width:140px;">证件类型</th>
+            <th style="width:125px;">到期日</th>
+            <th style="width:95px;">提醒天数</th>
+            <th style="width:120px;">剩余天数</th>
+            <th style="width:110px;">办理状态</th>
+            <th style="width:110px;">负责人</th>
+            <th>备注</th>
+            <th style="width:100px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <datalist id="typeOptions">
+    <option value="劳动合同"></option>
+    <option value="健康证"></option>
+    <option value="上岗证"></option>
+    <option value="驾驶证"></option>
+    <option value="身份证"></option>
+    <option value="营业执照"></option>
+    <option value="食品经营许可证"></option>
+    <option value="特种作业证"></option>
+    <option value="其他"></option>
+  </datalist>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    'use strict';
+
+    const STORAGE_KEY = 'contractCertManager_v2';
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const PROCESS_STATUSES = ['待处理', '办理中', '已续期', '无需处理'];
+
+    const tbody = document.getElementById('tbody');
+    const fileInput = document.getElementById('fileInput');
+    const backupInput = document.getElementById('backupInput');
+    const searchInput = document.getElementById('searchInput');
+    const statusFilter = document.getElementById('statusFilter');
+    const processFilter = document.getElementById('processFilter');
+    const sortSelect = document.getElementById('sortSelect');
+    const toastEl = document.getElementById('toast');
+    const saveInfo = document.getElementById('saveInfo');
+    const backupTip = document.getElementById('backupTip');
+
+    let list = loadList();
+    let saveTimer = null;
+    let toastTimer = null;
+
+    function createId() {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+      }
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    function todayLocal() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+
+    function parseLocalDate(dateStr) {
+      if (typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+
+      if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+      ) return null;
+
+      return date;
+    }
+
+    function formatLocalDate(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function addYears(dateStr, years = 1) {
+      const date = parseLocalDate(dateStr);
+      if (!date) return '';
+
+      const originalMonth = date.getMonth();
+      date.setFullYear(date.getFullYear() + years);
+
+      if (date.getMonth() !== originalMonth) {
+        date.setDate(0);
+      }
+
+      return formatLocalDate(date);
+    }
+
+    function normalizeDateValue(value) {
+      if (value === null || value === undefined || value === '') return '';
+
+      if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return formatLocalDate(value);
+      }
+
+      if (typeof value === 'number' && window.XLSX?.SSF?.parse_date_code) {
+        const parsed = XLSX.SSF.parse_date_code(value);
+        if (!parsed) return '';
+        return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+      }
+
+      const text = String(value).trim();
+      if (!text) return '';
+
+      const normalized = text
+        .replace(/[年/.]/g, '-')
+        .replace(/月/g, '-')
+        .replace(/日/g, '')
+        .replace(/\s+/g, '')
+        .replace(/-+/g, '-');
+
+      const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (!match) return '';
+
+      const result = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+      return parseLocalDate(result) ? result : '';
+    }
+
+    function daysLeft(dateStr) {
+      const end = parseLocalDate(dateStr);
+      if (!end) return null;
+      return Math.round((end.getTime() - todayLocal().getTime()) / DAY_MS);
+    }
+
+    function normalizeRecord(raw = {}) {
+      const remindDays = Number.parseInt(raw.remindDays, 10);
+      const processStatus = PROCESS_STATUSES.includes(raw.processStatus) ? raw.processStatus : '待处理';
+
+      return {
+        id: String(raw.id || createId()),
+        name: String(raw.name || '').trim(),
+        type: String(raw.type || '其他').trim() || '其他',
+        expire: normalizeDateValue(raw.expire),
+        remindDays: Number.isFinite(remindDays) ? Math.min(Math.max(remindDays, 0), 3650) : 30,
+        processStatus,
+        owner: String(raw.owner || '').trim(),
+        note: String(raw.note || '').trim(),
+        updatedAt: Number(raw.updatedAt) || Date.now()
+      };
+    }
+
+    function loadList() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          const legacy = localStorage.getItem('certList');
+          if (!legacy) return [];
+          const parsedLegacy = JSON.parse(legacy);
+          if (!Array.isArray(parsedLegacy)) return [];
+          return parsedLegacy.map(normalizeRecord);
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeRecord);
+      } catch (error) {
+        console.error('读取本地数据失败：', error);
+        return [];
+      }
+    }
+
+    function persist(showMessage = false) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+          const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+          saveInfo.textContent = `已保存到当前浏览器 · ${time}`;
+          if (showMessage) showToast('数据已保存');
+        } catch (error) {
+          console.error('保存失败：', error);
+          showToast('保存失败：浏览器存储空间可能不足');
+        }
+      }, 180);
+    }
+
+    function getStatus(item) {
+      const days = daysLeft(item.expire);
+
+      if (days === null) return { key: 'invalid', label: '缺少有效日期', className: 'muted' };
+      if (days < 0) return { key: 'overdue', label: `已过期 ${Math.abs(days)} 天`, className: 'overdue' };
+      if (days === 0) return { key: 'soon', label: '今天到期', className: 'soon' };
+      if (days <= Number(item.remindDays || 0)) return { key: 'soon', label: `剩余 ${days} 天`, className: 'soon' };
+      return { key: 'normal', label: `剩余 ${days} 天`, className: 'ok' };
+    }
+
+    function isCompleted(item) {
+      return item.processStatus === '已续期' || item.processStatus === '无需处理';
+    }
+
+    function isPending(item) {
+      const status = getStatus(item);
+      return !isCompleted(item) && (status.key === 'overdue' || status.key === 'soon');
+    }
+
+    function recordKey(item) {
+      return [
+        item.name.trim().toLowerCase(),
+        item.type.trim().toLowerCase(),
+        item.expire
+      ].join('|');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function getFilteredList() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      const statusValue = statusFilter.value;
+      const processValue = processFilter.value;
+
+      const filtered = list.filter(item => {
+        const haystack = `${item.name} ${item.type} ${item.owner} ${item.note}`.toLowerCase();
+        const matchesKeyword = !keyword || haystack.includes(keyword);
+        const matchesStatus = statusValue === 'all' || getStatus(item).key === statusValue;
+        const matchesProcess = processValue === 'all' || item.processStatus === processValue;
+        return matchesKeyword && matchesStatus && matchesProcess;
+      });
+
+      return filtered.sort((a, b) => {
+        const sort = sortSelect.value;
+
+        if (sort === 'nameAsc') return a.name.localeCompare(b.name, 'zh-CN');
+        if (sort === 'updatedDesc') return b.updatedAt - a.updatedAt;
+
+        const da = daysLeft(a.expire);
+        const db = daysLeft(b.expire);
+        const safeA = da === null ? Number.POSITIVE_INFINITY : da;
+        const safeB = db === null ? Number.POSITIVE_INFINITY : db;
+
+        return sort === 'daysDesc' ? safeB - safeA : safeA - safeB;
+      });
+    }
+
+    function renderStats(visibleCount) {
+      let overdue = 0;
+      let soon = 0;
+      let normal = 0;
+      let pending = 0;
+
+      list.forEach(item => {
+        const status = getStatus(item);
+        if (status.key === 'overdue') overdue++;
+        else if (status.key === 'soon') soon++;
+        else if (status.key === 'normal') normal++;
+        if (isPending(item)) pending++;
+      });
+
+      document.getElementById('statTotal').textContent = list.length;
+      document.getElementById('statPending').textContent = pending;
+      document.getElementById('statOverdue').textContent = overdue;
+      document.getElementById('statSoon').textContent = soon;
+      document.getElementById('statNormal').textContent = normal;
+      document.getElementById('statVisible').textContent = visibleCount;
+
+      backupTip.style.display = list.length > 0 ? 'block' : 'none';
+    }
+
+    function render() {
+      const visible = getFilteredList();
+
+      if (visible.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">暂无符合条件的数据</td></tr>';
+        renderStats(0);
+        return;
+      }
+
+      tbody.innerHTML = visible.map(item => {
+        const status = getStatus(item);
+        const rowClass = [
+          status.key === 'overdue' ? 'row-overdue' : '',
+          status.key === 'soon' ? 'row-soon' : '',
+          isCompleted(item) ? 'row-complete' : ''
+        ].filter(Boolean).join(' ');
+
+        return `
+          <tr class="${rowClass}" data-id="${escapeHtml(item.id)}">
+            <td data-label="姓名 / 单位">
+              <input value="${escapeHtml(item.name)}" data-field="name" aria-label="姓名或单位" placeholder="必填" />
+            </td>
+            <td data-label="证件类型">
+              <input value="${escapeHtml(item.type)}" data-field="type" list="typeOptions" aria-label="证件类型" />
+            </td>
+            <td data-label="到期日">
+              <input type="date" value="${escapeHtml(item.expire)}" data-field="expire" aria-label="到期日" />
+            </td>
+            <td data-label="提醒天数">
+              <input type="number" min="0" max="3650" value="${item.remindDays}" data-field="remindDays" aria-label="提前提醒天数" />
+            </td>
+            <td data-label="剩余天数">
+              <span class="days ${status.className}">${status.label}</span>
+            </td>
+            <td data-label="办理状态">
+              <select data-field="processStatus" aria-label="办理状态">
+                ${PROCESS_STATUSES.map(statusName =>
+                  `<option value="${statusName}" ${item.processStatus === statusName ? 'selected' : ''}>${statusName}</option>`
+                ).join('')}
+              </select>
+            </td>
+            <td data-label="负责人">
+              <input value="${escapeHtml(item.owner)}" data-field="owner" aria-label="负责人" placeholder="可选" />
+            </td>
+            <td data-label="备注">
+              <input value="${escapeHtml(item.note)}" data-field="note" aria-label="备注" placeholder="可选" />
+            </td>
+            <td data-label="操作" class="actions-cell">
+              <div class="row-actions">
+                <button class="btn btn-outline mini-btn" data-action="duplicate">复制</button>
+                <button class="btn btn-danger mini-btn" data-action="delete">删除</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      renderStats(visible.length);
+    }
+
+    function handleRenewal(item, element) {
+      const suggestedDate = addYears(item.expire, 1);
+
+      if (!confirm('是否同时更新到期日？')) {
+        return;
+      }
+
+      const input = prompt(
+        '请输入新的到期日（YYYY-MM-DD）：',
+        suggestedDate || ''
+      );
+
+      if (input === null) return;
+
+      const normalized = normalizeDateValue(input);
+
+      if (!normalized) {
+        alert('日期格式无效，请使用 YYYY-MM-DD，例如 2027-07-26。');
+        element.value = item.processStatus;
+        return;
+      }
+
+      item.expire = normalized;
+    }
+
+    function updateRecordFromElement(element) {
+      const row = element.closest('tr[data-id]');
+      if (!row) return;
+
+      const item = list.find(entry => entry.id === row.dataset.id);
+      if (!item) return;
+
+      const field = element.dataset.field;
+      let value = element.value;
+      const previousValue = item[field];
+
+      if (field === 'remindDays') {
+        value = Math.min(Math.max(Number.parseInt(value, 10) || 0, 0), 3650);
+        element.value = value;
+      }
+
+      if (field === 'expire') value = normalizeDateValue(value);
+
+      if (
+        field === 'processStatus' &&
+        value === '已续期' &&
+        previousValue !== '已续期'
+      ) {
+        item.processStatus = value;
+        handleRenewal(item, element);
+      } else {
+        item[field] = value;
+      }
+
+      item.updatedAt = Date.now();
+      persist();
+
+      if (['expire', 'remindDays', 'processStatus'].includes(field)) {
+        render();
+      } else {
+        renderStats(getFilteredList().length);
+      }
+    }
+
+    function addItem() {
+      list.push(normalizeRecord({
+        name: '',
+        type: '劳动合同',
+        expire: '',
+        remindDays: 30,
+        processStatus: '待处理',
+        owner: '',
+        note: ''
+      }));
+
+      persist();
+      render();
+
+      requestAnimationFrame(() => {
+        const rows = tbody.querySelectorAll('tr[data-id]');
+        const newRow = [...rows].find(row => row.dataset.id === list[list.length - 1].id);
+        newRow?.querySelector('[data-field="name"]')?.focus();
+      });
+    }
+
+    function removeItem(id) {
+      const item = list.find(entry => entry.id === id);
+      if (!item) return;
+
+      if (!confirm(`确认删除“${item.name || '未命名记录'}”吗？`)) return;
+
+      list = list.filter(entry => entry.id !== id);
+      persist();
+      render();
+      showToast('记录已删除');
+    }
+
+    function duplicateItem(id) {
+      const item = list.find(entry => entry.id === id);
+      if (!item) return;
+
+      const copy = normalizeRecord({
+        ...item,
+        id: createId(),
+        name: item.name ? `${item.name}（复制）` : '',
+        updatedAt: Date.now()
+      });
+
+      list.push(copy);
+      persist();
+      render();
+      showToast('已复制记录');
+    }
+
+    function exportRows(rows, filename) {
+      if (!window.XLSX) {
+        showToast('Excel 插件未加载，暂时无法导出');
+        return;
+      }
+
+      if (rows.length === 0) {
+        showToast('没有可导出的数据');
+        return;
+      }
+
+      const data = rows.map(item => {
+        const days = daysLeft(item.expire);
+        const status = getStatus(item);
+
+        return {
+          '姓名/单位': item.name,
+          '证件类型': item.type,
+          '到期日': item.expire,
+          '提醒天数': item.remindDays,
+          '剩余天数': days === null ? '' : days,
+          '到期状态': status.label,
+          '办理状态': item.processStatus,
+          '负责人': item.owner,
+          '备注': item.note
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      ws['!cols'] = [
+        { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+        { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 28 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '到期管理');
+      XLSX.writeFile(wb, filename);
+    }
+
+    function downloadJson(data, filename) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function getTodayString() {
+      return formatLocalDate(new Date());
+    }
+
+    async function importExcel(file) {
+      if (!window.XLSX) {
+        showToast('Excel 插件未加载，暂时无法导入');
+        return;
+      }
+
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+        if (!firstSheet) throw new Error('工作簿中没有工作表');
+
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '', raw: true });
+
+        if (rows.length === 0) {
+          showToast('Excel 中没有可导入的数据');
+          return;
+        }
+
+        const imported = rows.map(row => normalizeRecord({
+          name: row['姓名/单位'] || row['姓名'] || row['单位'] || row['name'] || '',
+          type: row['证件类型'] || row['类型'] || row['type'] || '其他',
+          expire: row['到期日'] || row['到期日期'] || row['有效期至'] || row['expire'] || '',
+          remindDays: row['提醒天数'] || row['提前提醒天数'] || 30,
+          processStatus: row['办理状态'] || row['状态'] || '待处理',
+          owner: row['负责人'] || row['经办人'] || '',
+          note: row['备注'] || row['说明'] || ''
+        })).filter(item => item.name || item.expire || item.note);
+
+        if (imported.length === 0) {
+          showToast('未识别到有效记录，请检查表头');
+          return;
+        }
+
+        const mode = confirm(
+          `识别到 ${imported.length} 条记录。\n\n点击“确定”追加导入并自动去重；点击“取消”覆盖现有数据。`
+        ) ? 'append' : 'replace';
+
+        if (mode === 'replace') {
+          list = imported;
+        } else {
+          const keys = new Set(list.map(recordKey));
+          let skipped = 0;
+
+          imported.forEach(item => {
+            const key = recordKey(item);
+            if (keys.has(key)) {
+              skipped++;
+              return;
+            }
+            keys.add(key);
+            list.push(item);
+          });
+
+          if (skipped > 0) showToast(`导入完成，跳过 ${skipped} 条重复记录`);
+        }
+
+        persist();
+        render();
+        if (mode === 'replace') showToast(`已覆盖导入 ${imported.length} 条记录`);
+      } catch (error) {
+        console.error('Excel 导入失败：', error);
+        alert(`导入失败：${error.message || '请检查文件格式和表头'}`);
+      } finally {
+        fileInput.value = '';
+      }
+    }
+
+    async function restoreBackup(file) {
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        if (!Array.isArray(parsed)) throw new Error('备份文件格式不正确');
+
+        const restored = parsed.map(normalizeRecord);
+
+        if (!confirm(`备份中包含 ${restored.length} 条记录，是否覆盖当前数据？`)) return;
+
+        list = restored;
+        persist();
+        render();
+        showToast('备份恢复成功');
+      } catch (error) {
+        console.error('恢复备份失败：', error);
+        alert(`恢复失败：${error.message || '备份文件损坏'}`);
+      } finally {
+        backupInput.value = '';
+      }
+    }
+
+    function clearAll() {
+      if (list.length === 0) {
+        showToast('当前没有数据');
+        return;
+      }
+
+      if (!confirm(
+        `即将永久清空 ${list.length} 条记录。\n\n这些数据只保存在当前浏览器中，清空后无法恢复。\n强烈建议先取消操作并点击“备份数据”。\n\n确认继续吗？`
+      )) return;
+
+      if (!confirm('再次确认：确定永久清空全部数据吗？')) return;
+
+      list = [];
+      localStorage.removeItem(STORAGE_KEY);
+      render();
+      saveInfo.textContent = '数据已清空';
+      showToast('全部数据已清空');
+    }
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      toastEl.textContent = message;
+      toastEl.classList.add('show');
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    }
+
+    tbody.addEventListener('input', event => {
+      if (!event.target.matches('[data-field]')) return;
+      if (['expire', 'remindDays', 'processStatus'].includes(event.target.dataset.field)) return;
+      updateRecordFromElement(event.target);
+    });
+
+    tbody.addEventListener('change', event => {
+      if (!event.target.matches('[data-field]')) return;
+      updateRecordFromElement(event.target);
+    });
+
+    tbody.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button) return;
+
+      const row = button.closest('tr[data-id]');
+      if (!row) return;
+
+      if (button.dataset.action === 'delete') removeItem(row.dataset.id);
+      if (button.dataset.action === 'duplicate') duplicateItem(row.dataset.id);
+    });
+
+    document.getElementById('btnAdd').addEventListener('click', addItem);
+
+    document.getElementById('btnExportPending').addEventListener('click', () => {
+      const pending = list.filter(isPending);
+      exportRows(pending, `合同证件待处理_${getTodayString()}.xlsx`);
+    });
+
+    document.getElementById('btnExportAll').addEventListener('click', () => {
+      exportRows(list, `合同证件全部清单_${getTodayString()}.xlsx`);
+    });
+
+    document.getElementById('btnBackup').addEventListener('click', () => {
+      if (list.length === 0) {
+        showToast('当前没有可备份的数据');
+        return;
+      }
+      downloadJson(list, `合同证件备份_${getTodayString()}.json`);
+    });
+
+    document.getElementById('btnClear').addEventListener('click', clearAll);
+
+    fileInput.addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      if (file) importExcel(file);
+    });
+
+    backupInput.addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      if (file) restoreBackup(file);
+    });
+
+    [searchInput, statusFilter, processFilter, sortSelect].forEach(control => {
+      control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', render);
+    });
+
+    window.addEventListener('beforeunload', () => {
+      clearTimeout(saveTimer);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      } catch (_) {}
+    });
+
+    if (!window.XLSX) {
+      document.getElementById('xlsxNotice').classList.add('show');
+    }
+
+    render();
+    if (list.length > 0) {
+      saveInfo.textContent = '已读取当前浏览器中的历史数据';
+      backupTip.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
