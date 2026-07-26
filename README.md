@@ -56,6 +56,8 @@ Excel 导入和导出功能通过 SheetJS CDN 加载，因此使用时需要网�
 
 到期日期推荐使用 `YYYY-MM-DD` 格式，例如 `2027-07-26`。
 
+仓库内提供了可直接编辑的导入模板：`docs/excel-template.csv`。
+
 ## 数据说明
 
 数据默认保存在浏览器的 `localStorage` 中，不会自动上传到服务器。
@@ -85,7 +87,8 @@ Excel 导入和导出功能通过 SheetJS CDN 加载，因此使用时需要网�
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE
-└── .gitignore
+└── docs/
+    └── excel-template.csv
 ```
 
 ## 许可证
